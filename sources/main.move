@@ -3,26 +3,23 @@ module energy::main {
     use sui::transfer;
     use sui::sui::SUI;
     use sui::coin::{Self, Coin};
-    use sui::clock::{Self, Clock, timestamp_ms};
+    use sui::clock::{Clock, timestamp_ms};
     use sui::object::{Self, UID, ID};
-    use sui::balance::{Self, Balance};
-    use sui::tx_context::{Self, TxContext, sender};
+    use sui::tx_context::{TxContext, sender};
     use sui::table::{Self, Table};
 
-    use std::option::{Option, none, some, is_some,borrow};
-    use std::string::{Self, String};
-    use std::vector::{Self};
+    use std::option::{Option, none, some, borrow};
+    use std::string::{String};
+    use std::vector::{};
 
     // Errors
-    const ERROR_INVALID_PROVIDER: u64 = 0;
-    const ERROR_MARKET_CLOSED: u64 = 1;
-    const ERROR_INVALID_CAP: u64 = 2;
-    const ERROR_INSUFFICIENT_FUNDS: u64 = 3;
-    const ERROR_ENERGY_NOT_SUBMITTED: u64 = 4;
-    const ERROR_WRONG_ADDRESS: u64 = 5;
-    const ERROR_TIME_IS_UP: u64 = 6;
-    const ERROR_INCORRECT_PARTY: u64 = 7;
-    const ERROR_DISPUTE_FALSE: u64 = 8;
+
+    const ERROR_MARKET_CLOSED: u64 = 0;
+    const ERROR_INVALID_CAP: u64 = 1;
+    const ERROR_INSUFFICIENT_FUNDS: u64 = 2;
+    const ERROR_WRONG_ADDRESS: u64 = 3;
+    const ERROR_TIME_IS_UP: u64 = 4;
+
 
     // Struct definitions
 
@@ -57,13 +54,6 @@ module energy::main {
         quantity: u64
     }
 
-    struct Complaint has key, store {
-        id: UID,
-        buyer: address,
-        provider: address,
-        reason: String,
-        decision: bool,
-    }
     // A hot potato for escrow
     struct Offer {
         item: EnergyOfferCap,
@@ -182,9 +172,9 @@ module energy::main {
     }
 
     // Provider confirms energy delivery
-    public fun confirm_energy(cap: EnergyOfferCap, self: &EnergyOffer, ctx: &mut TxContext) :Offer {
+    public fun confirm_energy(cap: EnergyOfferCap, self: &mut EnergyOffer, ctx: &mut TxContext) : Offer {
         assert!(cap.offer_id == object::id(self), ERROR_INVALID_CAP);
-        assert!(self.status, ERROR_ENERGY_NOT_SUBMITTED);
+        self.status = true; 
         let offer = Offer {
             item: cap,
             price: self.price,
