@@ -1,29 +1,25 @@
-module energy_marketplace::energy_marketplace {
-
+module energy::main {
     // Imports (adjust as needed)
     use sui::transfer;
     use sui::sui::SUI;
     use sui::coin::{Self, Coin};
-    use sui::clock::{Self, Clock, timestamp_ms};
+    use sui::clock::{Clock, timestamp_ms};
     use sui::object::{Self, UID, ID};
-    use sui::balance::{Self, Balance};
-    use sui::tx_context::{Self, TxContext, sender};
+    use sui::tx_context::{TxContext, sender};
     use sui::table::{Self, Table};
 
-    use std::option::{Option, none, some, is_some,borrow};
-    use std::string::{Self, String};
-    use std::vector::{Self};
+    use std::option::{Option, none, some, borrow};
+    use std::string::{String};
+    use std::vector::{};
 
     // Errors
-    const ERROR_INVALID_PROVIDER: u64 = 0;
-    const ERROR_MARKET_CLOSED: u64 = 1;
-    const ERROR_INVALID_CAP: u64 = 2;
-    const ERROR_INSUFFICIENT_FUNDS: u64 = 3;
-    const ERROR_ENERGY_NOT_SUBMITTED: u64 = 4;
-    const ERROR_WRONG_ADDRESS: u64 = 5;
-    const ERROR_TIME_IS_UP: u64 = 6;
-    const ERROR_INCORRECT_PARTY: u64 = 7;
-    const ERROR_DISPUTE_FALSE: u64 = 8;
+
+    const ERROR_MARKET_CLOSED: u64 = 0;
+    const ERROR_INVALID_CAP: u64 = 1;
+    const ERROR_INSUFFICIENT_FUNDS: u64 = 2;
+    const ERROR_WRONG_ADDRESS: u64 = 3;
+    const ERROR_TIME_IS_UP: u64 = 4;
+
 
     // Struct definitions
 
@@ -36,8 +32,8 @@ module energy_marketplace::energy_marketplace {
         description: String,
         energy_type: String,
         price_per_unit: u64,
+        price: u64,
         total_units: u64,
-        pay: Balance<SUI>,
         dispute: bool,
         status: bool,
         buyer: Option<address>,
@@ -46,7 +42,7 @@ module energy_marketplace::energy_marketplace {
         deadline: u64,
     }
 
-    struct EnergyOfferCap has key {
+    struct EnergyOfferCap has key, store {
         id: UID,
         offer_id: ID
     }
@@ -58,12 +54,11 @@ module energy_marketplace::energy_marketplace {
         quantity: u64
     }
 
-    struct Complaint has key, store {
-        id: UID,
-        buyer: address,
-        provider: address,
-        reason: String,
-        decision: bool,
+    // A hot potato for escrow
+    struct Offer {
+        item: EnergyOfferCap,
+        price: u64,
+        recipient: address
     }
 
     struct AdminCap has key {id: UID}
@@ -97,7 +92,8 @@ module energy_marketplace::energy_marketplace {
         description_: String,
         energy_type_: String,
         price_per_unit_: u64, 
-        total_units_: u64, 
+        total_units_: u64,
+        price_: u64, 
         duration_: u64, 
         ctx: &mut TxContext
         ) {
@@ -113,8 +109,8 @@ module energy_marketplace::energy_marketplace {
             description: description_,
             energy_type: energy_type_,
             price_per_unit: price_per_unit_,
+            price: price_,
             total_units: total_units_,
-            pay: balance::zero(),
             dispute: false,
             status: false,
             buyer: none(),
@@ -127,7 +123,8 @@ module energy_marketplace::energy_marketplace {
     }
 
     // Buyers should create a new purchase
-    public fun new_purchase(offer: ID, quantity_: u64, ctx: &mut TxContext) : Buyer {
+    public fun new_purchase(self: &EnergyOffer, offer: ID, quantity_: u64, ctx: &mut TxContext) : Buyer {
+        assert!(self.price == quantity_, ERROR_INSUFFICIENT_FUNDS);
         let buyer = Buyer {
             id: object::new(ctx),
             offer_id: offer,
@@ -144,14 +141,9 @@ module energy_marketplace::energy_marketplace {
     }
 
     // Energy provider should choose buyer and send energy to buyer object
-    public fun choose_buyer(cap: &EnergyOfferCap, offer: &mut EnergyOffer, coin: Coin<SUI>, chosen_buyer: address) : Buyer {
+    public fun choose_buyer(cap: &EnergyOfferCap, offer: &mut EnergyOffer, chosen_buyer: address) : Buyer {
         assert!(cap.offer_id == object::id(offer), ERROR_INVALID_CAP);
-        assert!(coin::value(&coin) >= offer.price_per_unit, ERROR_INSUFFICIENT_FUNDS);
-
         let buyer = table::remove(&mut offer.buyers, chosen_buyer);
-        let balance_ = coin::into_balance(coin);
-        // Submit the payment
-        balance::join(&mut offer.pay, balance_);
         // Close the offer
         offer.status = true;
         // Set the buyer's address 
@@ -166,56 +158,28 @@ module energy_marketplace::energy_marketplace {
         self.energySubmitted = true;
     }
 
+    public fun deposit(buyer: &Buyer, offer: Offer, coin: Coin<SUI>, ctx: &mut TxContext)  {
+        assert!(sender(ctx) == buyer.buyer, ERROR_WRONG_ADDRESS);
+        assert!(coin::value(&coin) == buyer.quantity, ERROR_INSUFFICIENT_FUNDS);
+        let Offer {
+            item,
+            price,
+            recipient
+        } = offer;
+        assert!(coin::value(&coin) == price, ERROR_INSUFFICIENT_FUNDS);
+        transfer::public_transfer(item, sender(ctx));
+        transfer::public_transfer(coin, recipient);
+    }
+
     // Provider confirms energy delivery
-    public fun confirm_energy(cap: &EnergyOfferCap, self: &mut EnergyOffer, ctx: &mut TxContext) {
+    public fun confirm_energy(cap: EnergyOfferCap, self: &mut EnergyOffer, ctx: &mut TxContext) : Offer {
         assert!(cap.offer_id == object::id(self), ERROR_INVALID_CAP);
-        assert!(self.energySubmitted, ERROR_ENERGY_NOT_SUBMITTED);
-        
-        let balance_ = balance::withdraw_all(&mut self.pay);
-        let coin_ = coin::from_balance(balance_, ctx);
-        
-        transfer::public_transfer(coin_, *borrow(&self.buyer));
-    }
-
-    // Either buyer or provider can raise a complaint
-    public fun raise_complaint(self: &mut EnergyOffer, c:&Clock, reason_: String, ctx: &mut TxContext) {
-        assert!(timestamp_ms(c) > self.deadline, ERROR_TIME_IS_UP);
-
-        let complainant = sender(ctx);
-        let other_party = self.provider;
-
-        assert!(complainant == sender(ctx) || other_party == sender(ctx), ERROR_INCORRECT_PARTY);
-
-        // Define the complaint
-        let complaint_ = Complaint{
-            id: object::new(ctx),
-            buyer: sender(ctx),
-            provider: other_party,
-            reason: reason_,
-            decision: false,
+        self.status = true; 
+        let offer = Offer {
+            item: cap,
+            price: self.price,
+            recipient: sender(ctx)
         };
-        self.dispute = true;
-
-        transfer::share_object(complaint_);
-    }
-
-    // Admin resolves disputes
-    public fun resolve_dispute(
-        _: &AdminCap,
-        self: &mut EnergyOffer,
-        complaint: &mut Complaint,
-        decision: bool,
-        ctx: &mut TxContext
-    ) {
-        assert!(self.dispute, ERROR_DISPUTE_FALSE);
-        let complainant = complaint.buyer;
-        let provider = complaint.provider;
-
-        // If admin decides true, resolve the dispute
-        if(decision == true) { 
-            let balance_ = balance::withdraw_all(&mut self.pay);
-            let coin_ = coin::from_balance(balance_, ctx);
-            transfer::public_transfer(coin_, *borrow(&self.buyer));
-        }
+       offer
     }
 }
