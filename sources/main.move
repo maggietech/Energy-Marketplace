@@ -1,5 +1,4 @@
-module energy_marketplace::energy_marketplace {
-
+module energy::main {
     // Imports (adjust as needed)
     use sui::transfer;
     use sui::sui::SUI;
