@@ -1,5 +1,5 @@
 [package]
-name = "dacade_deepbook"
+name = "energy_marketplace"
 version = "0.0.1"
 
 [dependencies]
@@ -7,3 +7,4 @@ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-fram
 
 [addresses]
 energy_marketplace = "0x0"
+
